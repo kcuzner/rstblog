@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "rstblog"
+version = "0.1.0"
+description = ""
+authors = ["Kevin Cuzner <kevincuzner@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "*"
+
+[tool.poetry.dev-dependencies]
+pytest = "^3.4"
+
+
+[build-system]
+reqires = ["poetry>=1.0"]
+build.backend = "poetry.masonry.api"
+
