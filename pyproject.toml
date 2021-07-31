@@ -5,11 +5,13 @@ description = ""
 authors = ["Kevin Cuzner <kevincuzner@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "*"
+python = "^3.8"
+Flask = "^2.0.1"
+docutils = "^0.17.1"
+toml = "^0.10.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^3.4"
-
 
 [build-system]
 reqires = ["poetry>=1.0"]

@@ -17,13 +17,17 @@ ENV YOUR_ENV=${YOUR_ENV} \
 RUN pip3 install "poetry==$POETRY_VERSION"
 
 # Copy only requirements to cache them in docker layer
-WORKDIR /app
-COPY poetry.lock pyproject.toml /app
+WORKDIR /app/
+COPY poetry.lock pyproject.toml /app/
 
 # Project initialization:
 RUN poetry config virtualenvs.create false \
   && poetry install $(test "$YOUR_ENV" == production && echo "--no-dev") --no-interaction --no-ansi
 
-# Creating folders, and files for a project:
-COPY . /app
+# Set up flask environment
+env FLASK_APP=rstblog
 
+# Creating folders, and files for a project:
+COPY . /app/
+
+ENTRYPOINT ["/bin/sh", "-c", "poetry run flask run --host=0.0.0.0"]
