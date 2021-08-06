@@ -16,4 +16,5 @@ posts = "./posts"
 [server]
 port = 3000
 directory = "./output/html"
+secret = ""
 
