@@ -1,3 +1,4 @@
 output/
 settings.toml
+__pycache__
 

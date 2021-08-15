@@ -25,9 +25,7 @@ RUN poetry config virtualenvs.create false \
   && poetry install $(test "$YOUR_ENV" == production && echo "--no-dev") --no-interaction --no-ansi
 
 # Set up flask environment
-env FLASK_APP=rstblog
+env FLASK_APP=app
 
 # Creating folders, and files for a project:
 COPY . /app/
-
-ENTRYPOINT ["/bin/sh", "-c", "poetry run flask run --host=0.0.0.0"]
