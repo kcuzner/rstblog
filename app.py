@@ -30,3 +30,4 @@ async def request_refresh():
     data = request.json
     print(data)
     return {}
+

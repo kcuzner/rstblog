@@ -3,7 +3,8 @@ services:
     image: "redis:5-alpine"
   web:
     build: .
-    command: poetry run flask run --host=0.0.0.0
+    #command: poetry run flask run --host=0.0.0.0
+    command: python pywsgi.py
     ports:
       - "5000:5000"
     depends_on:

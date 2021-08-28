@@ -1,4 +1,4 @@
-FROM python:3.8.10-slim-buster
+FROM python:3.8.10-slim
 
 #RUN apt-get -y install python3 python3-pip
 
@@ -14,7 +14,7 @@ ENV YOUR_ENV=${YOUR_ENV} \
   POETRY_VERSION=1.0.0
 
 # System deps:
-RUN pip3 install "poetry==$POETRY_VERSION"
+RUN pip3 install "poetry==$POETRY_VERSION" gevent
 
 # Copy only requirements to cache them in docker layer
 WORKDIR /app/
