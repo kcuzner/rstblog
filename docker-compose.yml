@@ -1,17 +1,27 @@
 services:
   redis:
     image: "redis:5-alpine"
+  nginx:
+    build:
+      context: ./nginx
+    ports:
+      - "3000:80"
+    depends_on:
+      - "web"
+    volumes:
+      - content:/usr/share/nginx/html
   web:
     build: .
-    #command: poetry run flask run --host=0.0.0.0
     command: python pywsgi.py
-    ports:
-      - "5000:5000"
     depends_on:
       - "redis"
+    volumes:
+      - content:/app/output
   worker:
     build: .
     command: poetry run celery -A worker worker -B -l info
     depends_on:
       - "redis"
 
+volumes:
+  content:
