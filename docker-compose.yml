@@ -9,7 +9,7 @@ services:
     depends_on:
       - "web"
     volumes:
-      - content:/usr/share/nginx/html
+      - content:/srv/www
   web:
     build: .
     command: python pywsgi.py
