@@ -1,2 +1,6 @@
-docker run -it -p 5000:5000 $(docker build -q .)
+#!/bin/bash
 
+set -e
+
+docker-compose -f docker-compose.yml -f docker-compose.override.yml build
+docker-compose -f docker-compose.yml -f docker-compose.override.yml up

@@ -1,6 +1,8 @@
 FROM python:3.8.10-slim
 
-#RUN apt-get -y install python3 python3-pip
+RUN apt-get update && \
+    apt-get -y install git && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 ARG YOUR_ENV
 
