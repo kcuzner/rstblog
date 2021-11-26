@@ -12,6 +12,12 @@ settings = toml.load("./settings.toml")
 actions = queue.Queue()
 app = Flask(__name__)
 
+
+@app.before_first_request
+def clone_repo():
+    worker.clone_repository.delay().wait()
+
+
 def validate_hmac(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -19,10 +25,12 @@ def validate_hmac(f):
 
     return wrapper
 
+
 @app.route("/test")
 def hi():
-    worker.clone_repository.delay()
+    worker.update.delay()
     return {}
+
 
 @app.route("/refresh", methods=["POST"])
 @validate_hmac
@@ -30,4 +38,3 @@ async def request_refresh():
     data = request.json
     print(data)
     return {}
-

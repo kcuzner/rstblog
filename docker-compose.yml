@@ -9,19 +9,21 @@ services:
     depends_on:
       - "web"
     volumes:
-      - content:/srv/www
+      - content:/app/output
   web:
     build: .
     command: python pywsgi.py
     depends_on:
       - "redis"
     volumes:
-      - content:/app/output
+      - content:/app/output/html
   worker:
     build: .
     command: poetry run celery -A worker worker -B -l info
     depends_on:
       - "redis"
+    volumes:
+      - content:/app/output/html
 
 volumes:
   content:
