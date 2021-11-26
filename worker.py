@@ -16,6 +16,11 @@ app = Celery(
 
 
 class WorkingDir:
+    """
+    Execute a block of code while in a particular working directory, restoring
+    the previous directory once finished.
+    """
+
     def __init__(self, directory):
         self.dir = directory
 
@@ -28,6 +33,10 @@ class WorkingDir:
 
 
 class PygmentsDirective(rst.Directive):
+    """
+    Handle code-block directives using Pygments
+    """
+
     required_arguments = 1
     optional_arguments = 0
     final_argument_whitespace = True
