@@ -3,6 +3,7 @@ from celery import Celery
 import subprocess, os
 
 import docutils.core
+from docutils.parsers import rst
 import toml
 
 settings = toml.load("./settings.toml")
@@ -24,6 +25,35 @@ class WorkingDir:
 
     def __exit__(self, type, value, traceback):
         os.chdir(self.original)
+
+
+class PygmentsDirective(rst.Directive):
+    required_arguments = 1
+    optional_arguments = 0
+    final_argument_whitespace = True
+    option_spec = {}
+    has_content = True
+
+    def run(self):
+        from docutils import nodes
+        from pygments import highlight
+        from pygments.lexers import get_lexer_by_name
+        from pygments.formatters import HtmlFormatter
+
+        pygments_formatter = HtmlFormatter()
+
+        print(f"Rendering {self.content}")
+
+        try:
+            lexer = get_lexer_by_name(self.arguments[0])
+        except ValueError:
+            # no lexer found - use the text one instead of an exception
+            lexer = get_lexer_by_name("text")
+        parsed = highlight("\n".join(self.content), lexer, pygments_formatter)
+        return [nodes.raw("", parsed, format="html")]
+
+
+rst.directives.register_directive("code-block", PygmentsDirective)
 
 
 @app.task
