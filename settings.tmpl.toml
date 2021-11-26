@@ -5,13 +5,21 @@ url = "../rstblog-content"
 # Directory to clone into
 directory = "./output/repo"
 
-[rst]
-# Path to the index page
-index = "./index.rst"
+[blog]
+# Path to the index template
+index = "index.j2"
+# Path to the tags template
+tags = "tags.j2"
+# Path to the post template
+post = "post.j2"
+# Path to the page template
+page = "page.j2"
+# Paths to static content
+static = ["css", "js"]
 # Relative to the repo, location of the folder containing all the pages
-pages = "./pages"
+pages = "./posts"
 # Relative to the repo, location of the folder containing all the posts
-posts = "./posts"
+posts = "./pages"
 
 [server]
 port = 3000

@@ -2,7 +2,6 @@ from celery import Celery
 
 import subprocess, os
 
-import docutils.core
 from docutils.parsers import rst
 import toml
 
@@ -67,6 +66,9 @@ rst.directives.register_directive("code-block", PygmentsDirective)
 
 @app.task
 def clone_repository():
+    """
+    Creates the initial repository clone
+    """
     repo_url = settings["repository"]["url"]
     repo_dir = os.path.abspath(settings["repository"]["directory"])
     print(f"Cloning {repo_url} into {repo_dir}")
@@ -76,15 +78,40 @@ def clone_repository():
 
 @app.task
 def update():
+    """
+    Updates the repo and re-renders all content
+    """
+    import glob, shutil
+    import docutils.core
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
     repo_dir = os.path.abspath(settings["repository"]["directory"])
     print(f"Updating {repo_dir}")
     with WorkingDir(repo_dir):
         subprocess.run(["git", "remote", "-v"])
         subprocess.run(["git", "pull"])
-        index = os.path.abspath(settings["rst"]["index"])
+        loader = FileSystemLoader(os.path.abspath("./"))
+        posts = glob.glob(
+            os.path.abspath(settings["blog"]["posts"]) + "/**/*.rst", recursive=True
+        )
+        pages = glob.glob(
+            os.path.abspath(settings["blog"]["pages"]) + "/**/*.rst", recursive=True
+        )
+        static = [(d, os.path.abspath(d)) for d in settings["blog"]["static"]]
+
+    jinja_env = Environment(loader=loader, autoescape=select_autoescape())
     out_dir = os.path.abspath(settings["server"]["directory"])
     print(f"Rendering into {out_dir}")
     with WorkingDir(out_dir):
-        docutils.core.publish_file(
-            source_path=index, destination_path="./index.html", writer_name="html"
-        )
+        # Copy in static content
+        for s in static:
+            shutil.rmtree(s[0], ignore_errors=True)
+            if os.path.exists(s[1]):
+                shutil.copytree(s[1], os.path.abspath(s[0]))
+        # Render the index
+        index = jinja_env.get_template(settings["blog"]["index"])
+        with open("./index.html", "w") as f:
+            f.write(index.render())
+        # docutils.core.publish_file(
+        #     source_path=index, destination_path="./index.html", writer_name="html"
+        # )
