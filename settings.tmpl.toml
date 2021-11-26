@@ -17,9 +17,9 @@ page = "page.j2"
 # Paths to static content
 static = ["css", "js"]
 # Relative to the repo, location of the folder containing all the pages
-pages = "./posts"
+pages = "./pages"
 # Relative to the repo, location of the folder containing all the posts
-posts = "./pages"
+posts = "./posts"
 
 [server]
 port = 3000

@@ -82,6 +82,7 @@ def update():
     Updates the repo and re-renders all content
     """
     import glob, shutil
+    from pathlib import Path
     import docutils.core
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -101,6 +102,13 @@ def update():
 
     jinja_env = Environment(loader=loader, autoescape=select_autoescape())
     out_dir = os.path.abspath(settings["server"]["directory"])
+    print(f"Cleaning {out_dir}")
+    for f in os.listdir(out_dir):
+        path = os.path.join(out_dir, f)
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            os.remove(path)
     print(f"Rendering into {out_dir}")
     with WorkingDir(out_dir):
         # Copy in static content
@@ -108,6 +116,15 @@ def update():
             shutil.rmtree(s[0], ignore_errors=True)
             if os.path.exists(s[1]):
                 shutil.copytree(s[1], os.path.abspath(s[0]))
+        # Render each page
+        for page in pages:
+            out_path = Path(page).stem + ".html"
+            print(f"Rendering {page} into {out_path}")
+            with open(page) as f:
+                parts = docutils.core.publish_parts(source=f.read(), writer_name="html")
+            page_tmpl = jinja_env.get_template(settings["blog"]["page"])
+            with open(out_path, "w") as f:
+                f.write(page_tmpl.render(parts=parts))
         # Render the index
         index = jinja_env.get_template(settings["blog"]["index"])
         with open("./index.html", "w") as f:
