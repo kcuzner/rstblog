@@ -256,6 +256,24 @@ class PostCompiler(Compiler):
         return os.path.join(out_dir, date, os.path.relpath(url, "/"))
 
 
+class RstBlog:
+    """
+    Renders all blog content, including index and tag pages
+    """
+
+    def __init__(self, pages, posts, jinja_env, out_dir):
+        self.pages = [PageCompiler(p).compile(jinja_env, out_dir) for p in pages]
+        self.posts = [PostCompiler(p).compile(jinja_env, out_dir) for p in posts]
+        self.index_template = jinja_env.get_template(settings["blog"]["index"])
+        self.out_dir = out_dir
+
+    def render(self):
+        for r in self.pages + self.posts:
+            r.render()
+        with open(os.path.join(self.out_dir, "./index.html"), "w") as f:
+            f.write(self.index_template.render())
+
+
 @app.task
 def clone_repository():
     """
@@ -305,19 +323,5 @@ def update():
             shutil.rmtree(s[0], ignore_errors=True)
             if os.path.exists(s[1]):
                 shutil.copytree(s[1], os.path.abspath(s[0]))
-        # Render each page
-        compiled_pages = [
-            PageCompiler(page).compile(jinja_env, out_dir) for page in pages
-        ]
-        for r in compiled_pages:
-            r.render()
-        # Render each post
-        compiled_posts = [
-            PostCompiler(post).compile(jinja_env, out_dir) for post in posts
-        ]
-        for r in compiled_posts:
-            r.render()
-        # Render the index
-        index = jinja_env.get_template(settings["blog"]["index"])
-        with open("./index.html", "w") as f:
-            f.write(index.render())
+        blog = RstBlog(pages, posts, jinja_env, out_dir)
+        blog.render()
