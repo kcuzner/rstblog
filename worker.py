@@ -165,22 +165,42 @@ class BlogWriter(html4css1.Writer):
                 self.parts[part] = "".join(getattr(self, part))
 
 
-class Renderer:
+class Renderable:
+    """
+    Something which renders into an output file
+    """
+
+    def __init__(self, out_path, render_fn):
+        self.out_path = out_path
+        self.render_fn = render_fn
+
+    def render(self):
+        print(f"Rendering {self.out_path}")
+        with open(self.out_path, "w") as f:
+            f.write(self.render_fn())
+
+
+class Compiler:
+    """
+    Compiles an rst page, returning a Renderable
+    """
+
     def __init__(self, src):
         self.src = src
 
-    def render(self, jinja_env, out_dir):
+    def compile(self, jinja_env, out_dir):
         import shutil
         from pathlib import Path
         import docutils.core
 
-        print(f"Rendering {self.src}")
+        print(f"Compiling {self.src}")
         # Parse the document
         with open(self.src) as f:
             parts = docutils.core.publish_parts(source=f.read(), writer=BlogWriter())
         doc_settings = parts["rstblog_settings"]
         doc_content = parts["rstblog_content"]
         title = doc_settings["title"]
+        tags = doc_settings["tags"]
         # Determine page path
         doc_dir = self.get_dir(out_dir, doc_settings)
         out_path = os.path.join(doc_dir, "index.html")
@@ -191,10 +211,16 @@ class Renderer:
             item_src = os.path.join(Path(self.src).parent, item)
             item_dest = os.path.join(doc_dir, item)
             shutil.copyfile(item_src, item_dest)
-        print(f"Rendering into {out_path}")
+        # Set up for rendering
+        # Actual rendering occurs later since we need the full list of posts
+        # and such for each page to be rendered correctly.
         template = self.get_template(jinja_env)
-        with open(out_path, "w") as f:
-            f.write(template.render(parts=parts))
+        return Renderable(
+            out_path,
+            lambda **kwargs: template.render(
+                parts=parts, title=title, tags=tags, **kwargs
+            ),
+        )
 
     def get_template(self, jinja_env):
         raise NotImplementedError(f"get_template must be overriden in {type(self)}")
@@ -203,7 +229,7 @@ class Renderer:
         raise NotImplementedError(f"get_template must be overridden in {type(self)}")
 
 
-class PageRenderer(Renderer):
+class PageCompiler(Compiler):
     def get_template(self, jinja_env):
         return jinja_env.get_template(settings["blog"]["page"])
 
@@ -216,7 +242,7 @@ class PageRenderer(Renderer):
         return os.path.join(out_dir, os.path.relpath(url, "/"))
 
 
-class PostRenderer(Renderer):
+class PostCompiler(Compiler):
     def get_template(self, jinja_env):
         return jinja_env.get_template(settings["blog"]["post"])
 
@@ -280,11 +306,17 @@ def update():
             if os.path.exists(s[1]):
                 shutil.copytree(s[1], os.path.abspath(s[0]))
         # Render each page
-        for page in pages:
-            PageRenderer(page).render(jinja_env, out_dir)
+        compiled_pages = [
+            PageCompiler(page).compile(jinja_env, out_dir) for page in pages
+        ]
+        for r in compiled_pages:
+            r.render()
         # Render each post
-        for post in posts:
-            PostRenderer(post).render(jinja_env, out_dir)
+        compiled_posts = [
+            PostCompiler(post).compile(jinja_env, out_dir) for post in posts
+        ]
+        for r in compiled_posts:
+            r.render()
         # Render the index
         index = jinja_env.get_template(settings["blog"]["index"])
         with open("./index.html", "w") as f:
