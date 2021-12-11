@@ -20,6 +20,8 @@ static = ["css", "js"]
 pages = "./pages"
 # Relative to the repo, location of the folder containing all the posts
 posts = "./posts"
+# Posts per index page
+paginate = 10
 
 [server]
 port = 3000

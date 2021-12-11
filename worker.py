@@ -1,6 +1,7 @@
 from celery import Celery
 
 import subprocess, os
+from functools import cached_property
 
 import docutils.nodes
 from docutils.parsers import rst
@@ -174,10 +175,33 @@ class Renderable:
         self.out_path = out_path
         self.render_fn = render_fn
 
-    def render(self):
+    def render(self, **kwargs):
         print(f"Rendering {self.out_path}")
         with open(self.out_path, "w") as f:
-            f.write(self.render_fn())
+            f.write(self.render_fn(**kwargs))
+
+
+class DocumentRenderable(Renderable):
+    """
+    Renderable that holds some metadata about a document
+    """
+
+    def __init__(self, out_path, render_fn, url, doc_settings):
+        super().__init__(out_path, render_fn)
+        self._url = url
+        self.doc_settings = doc_settings
+
+    @cached_property
+    def title(self):
+        return self.doc_settings["title"]
+
+    @cached_property
+    def tags(self):
+        return self.doc_settings["tags"]
+
+    @cached_property
+    def url(self):
+        return self._url
 
 
 class Compiler:
@@ -202,7 +226,10 @@ class Compiler:
         title = doc_settings["title"]
         tags = doc_settings["tags"]
         # Determine page path
-        doc_dir = self.get_dir(out_dir, doc_settings)
+        url = self.get_url(doc_settings)
+        print(f"Got url {url}, out_dir={out_dir}")
+        doc_dir = os.path.join(out_dir, url)
+        print(f"Doc dir: {doc_dir}")
         out_path = os.path.join(doc_dir, "index.html")
         os.makedirs(doc_dir, exist_ok=True)  # Subpaths of dates may exist
         # Copy content
@@ -215,17 +242,19 @@ class Compiler:
         # Actual rendering occurs later since we need the full list of posts
         # and such for each page to be rendered correctly.
         template = self.get_template(jinja_env)
-        return Renderable(
+        return DocumentRenderable(
             out_path,
             lambda **kwargs: template.render(
                 parts=parts, title=title, tags=tags, **kwargs
             ),
+            url,
+            doc_settings,
         )
 
     def get_template(self, jinja_env):
         raise NotImplementedError(f"get_template must be overriden in {type(self)}")
 
-    def get_dir(self, out_dir, page_settings):
+    def get_url(self, page_settings):
         raise NotImplementedError(f"get_template must be overridden in {type(self)}")
 
 
@@ -233,27 +262,27 @@ class PageCompiler(Compiler):
     def get_template(self, jinja_env):
         return jinja_env.get_template(settings["blog"]["page"])
 
-    def get_dir(self, out_dir, page_settings):
+    def get_url(self, page_settings):
         url = page_settings["url"]
         if not os.path.isabs(url):
             raise ValueError(
                 f'Document {self.src} needs an absolute path, "{page_settings["url"]}" supplied'
             )
-        return os.path.join(out_dir, os.path.relpath(url, "/"))
+        return os.path.relpath(url, "/")
 
 
 class PostCompiler(Compiler):
     def get_template(self, jinja_env):
         return jinja_env.get_template(settings["blog"]["post"])
 
-    def get_dir(self, out_dir, page_settings):
+    def get_url(self, page_settings):
         url = page_settings["url"]
         date = page_settings["date"].strftime("%Y/%m/%d")  # YYY/MM/DD
         if not os.path.isabs(url):
             raise ValueError(
                 f'Document {self.src} needs an absolute path, "{page_settings["url"]}" supplied'
             )
-        return os.path.join(out_dir, date, os.path.relpath(url, "/"))
+        return os.path.join(date, os.path.relpath(url, "/"))
 
 
 class RstBlog:
@@ -268,10 +297,65 @@ class RstBlog:
         self.out_dir = out_dir
 
     def render(self):
+        import itertools
+        from datetime import datetime
+
+        # Posts are sorted by date
+        self.posts.sort(key=lambda d: d.doc_settings["date"])
+        self.posts.reverse()
+        step = settings["blog"]["paginate"]
+        paginated = [self.posts[i : i + step] for i in range(0, len(self.posts), step)]
+        post_months = [
+            (d.doc_settings["date"].strftime("%Y/%m"), d) for d in self.posts
+        ]
+        posts_by_month = [
+            (datetime.strptime(m, "%Y/%m"), m, list(g))
+            for m, g in itertools.groupby(
+                self.posts, key=lambda p: p.doc_settings["date"].strftime("%Y/%m")
+            )
+        ]
+
+        # Render everything
+        render_params = {
+            "pages": self.pages,
+            "posts_by_month": posts_by_month,
+            "posts_paginated": paginated,
+        }
+        # Pages and posts
         for r in self.pages + self.posts:
-            r.render()
-        with open(os.path.join(self.out_dir, "./index.html"), "w") as f:
-            f.write(self.index_template.render())
+            r.render(**render_params)
+        # Monthly index
+        for date, url, posts in posts_by_month:
+            month_paginated = [posts[i : i + step] for i in range(0, len(posts), step)]
+            name = f"{url}/index.html"
+            month = date.strftime("%b %Y")
+            for i, page in enumerate(month_paginated):
+                name = f"{url}/index{i}" if i else f"{url}/index"
+                # NOTE: The folder should have already been created when rendering
+                # pages and posts
+                with open(os.path.join(self.out_dir, f"{name}.html"), "w") as f:
+                    f.write(
+                        self.index_template.render(
+                            index_name=f"Posts {month}, Page {i+1}",
+                            index_posts=posts,
+                            index_number=0,
+                            index_count=1,
+                            **render_params,
+                        )
+                    )
+        # Main index
+        for i, page in enumerate(paginated):
+            name = f"index{i}" if i else "index"
+            with open(os.path.join(self.out_dir, f"./{name}.html"), "w") as f:
+                f.write(
+                    self.index_template.render(
+                        index_name=f"Page {i+1}",
+                        index_posts=page,
+                        index_number=i,
+                        index_count=len(paginated),
+                        **render_params,
+                    )
+                )
 
 
 @app.task
@@ -296,8 +380,9 @@ def update():
     repo_dir = os.path.abspath(settings["repository"]["directory"])
     print(f"Updating {repo_dir}")
     with WorkingDir(repo_dir):
-        subprocess.run(["git", "remote", "-v"])
-        subprocess.run(["git", "pull"])
+        subprocess.check_output(["git", "remote", "-v"])
+        subprocess.check_output(["git", "fetch"])
+        subprocess.check_output(["git", "reset", "--hard", "origin/master"])
         loader = FileSystemLoader(os.path.abspath("./"))
         posts = glob.glob(
             os.path.abspath(settings["blog"]["posts"]) + "/**/*.rst", recursive=True
