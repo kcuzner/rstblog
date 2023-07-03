@@ -114,6 +114,25 @@ class RstBlogSettingsDirective(rst.Directive):
 rst.directives.register_directive("rstblog-settings", RstBlogSettingsDirective)
 
 
+class rstblog_break(docutils.nodes.Element):
+    pass
+
+
+class RstBlogBreakDirective(rst.Directive):
+    """
+    Handle rstblog-break directives
+    """
+
+    required_arguments = 0
+    optional_arguments = 0
+
+    def run(self):
+        return [rstblog_break()]
+
+
+rst.directives.register_directive("rstblog-break", RstBlogBreakDirective)
+
+
 class BlogTranslator(html4css1.HTMLTranslator):
     """
     Customized docutils translator which handles the rstblog-settings nodes
@@ -124,6 +143,11 @@ class BlogTranslator(html4css1.HTMLTranslator):
         super().__init__(document)
         self.rstblog_settings = {}
         self.rstblog_content = []
+        self._rstblog_preview = None
+
+    @property
+    def rstblog_preview(self):
+        return self._rstblog_preview if self._rstblog_preview else "".join(self.body)
 
     def visit_image(self, node):
         super().visit_image(node)
@@ -142,6 +166,12 @@ class BlogTranslator(html4css1.HTMLTranslator):
     def depart_rstblog_settings(self, node):
         pass
 
+    def visit_rstblog_break(self, node):
+        self._rstblog_preview = "".join(self.body)
+
+    def depart_rstblog_break(self, node):
+        pass
+
 
 class BlogWriter(html4css1.Writer):
     """
@@ -149,7 +179,7 @@ class BlogWriter(html4css1.Writer):
     declaring metadata about a document.
     """
 
-    rstblog_attributes = ("rstblog_settings", "rstblog_content")
+    rstblog_attributes = ("rstblog_settings", "rstblog_content", "rstblog_preview")
 
     visitor_attributes = html4css1.Writer.visitor_attributes + rstblog_attributes
 
@@ -186,10 +216,11 @@ class DocumentRenderable(Renderable):
     Renderable that holds some metadata about a document
     """
 
-    def __init__(self, out_path, render_fn, url, doc_settings):
+    def __init__(self, out_path, render_fn, url, doc_settings, doc_preview):
         super().__init__(out_path, render_fn)
         self._url = url
         self.doc_settings = doc_settings
+        self.doc_preview = doc_preview
 
     @cached_property
     def title(self):
@@ -223,6 +254,7 @@ class Compiler:
             parts = docutils.core.publish_parts(source=f.read(), writer=BlogWriter())
         doc_settings = parts["rstblog_settings"]
         doc_content = parts["rstblog_content"]
+        doc_preview = parts["rstblog_preview"]
         title = doc_settings["title"]
         tags = doc_settings["tags"]
         # Determine page path
@@ -249,6 +281,7 @@ class Compiler:
             ),
             url,
             doc_settings,
+            doc_preview,
         )
 
     def get_template(self, jinja_env):
