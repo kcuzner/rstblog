@@ -1,4 +1,7 @@
 from celery import Celery
+from celery.utils.log import get_task_logger
+
+logger = get_task_logger(__name__)
 
 import subprocess, os
 from functools import cached_property
@@ -49,8 +52,9 @@ class PygmentsDirective(rst.Directive):
         from pygments import highlight
         from pygments.lexers import get_lexer_by_name
         from pygments.formatters import HtmlFormatter
+        from pygments.styles import get_style_by_name
 
-        pygments_formatter = HtmlFormatter()
+        pygments_formatter = HtmlFormatter(style="friendly")
 
         try:
             lexer = get_lexer_by_name(self.arguments[0])
@@ -183,9 +187,26 @@ class BlogWriter(html4css1.Writer):
 
     visitor_attributes = html4css1.Writer.visitor_attributes + rstblog_attributes
 
-    def __init__(self):
+    def __init__(self, src):
         super().__init__()
         self.translator_class = BlogTranslator
+        self._src = src
+
+    def translate(self):
+        from docutils.utils import Reporter
+
+        super().translate()
+        if len(self.document.parse_messages):
+            logger.warning(f"Docutils reported issues with {self._src}")
+        for m in self.document.parse_messages:
+            if m["level"] == Reporter.WARNING_LEVEL:
+                logger.warning(m.astext())
+            elif m["level"] == Reporter.ERROR_LEVEL:
+                logger.error(m.astext())
+            elif m["level"] == Reporter.SEVERE_LEVEL:
+                logger.critical(m.astext())
+            else:
+                logger.info(m.astext())
 
     def assemble_parts(self):
         super().assemble_parts()
@@ -206,7 +227,7 @@ class Renderable:
         self.render_fn = render_fn
 
     def render(self, **kwargs):
-        print(f"Rendering {self.out_path}")
+        # print(f"Rendering {self.out_path}")
         with open(self.out_path, "w") as f:
             f.write(self.render_fn(**kwargs))
 
@@ -248,10 +269,13 @@ class Compiler:
         from pathlib import Path
         import docutils.core
 
-        print(f"Compiling {self.src}")
+        logger.debug(f"Compiling {self.src}")
         # Parse the document
         with open(self.src) as f:
-            parts = docutils.core.publish_parts(source=f.read(), writer=BlogWriter())
+            parts = docutils.core.publish_parts(
+                source=f.read(),
+                writer=BlogWriter(self.src),
+            )
         doc_settings = parts["rstblog_settings"]
         doc_content = parts["rstblog_content"]
         doc_preview = parts["rstblog_preview"]
@@ -259,13 +283,13 @@ class Compiler:
         tags = doc_settings["tags"]
         # Determine page path
         url = self.get_url(doc_settings)
-        print(f"Got url {url}, out_dir={out_dir}")
+        logger.debug(f"Got url {url}, out_dir={out_dir}")
         doc_dir = os.path.join(out_dir, url)
-        print(f"Doc dir: {doc_dir}")
+        logger.debug(f"Doc dir: {doc_dir}")
         out_path = os.path.join(doc_dir, "index.html")
         os.makedirs(doc_dir, exist_ok=True)  # Subpaths of dates may exist
         # Copy content
-        print(f"Copying {len(doc_content)} items into {doc_dir}")
+        logger.debug(f"Copying {len(doc_content)} items into {doc_dir}")
         for item in doc_content:
             item_src = os.path.join(Path(self.src).parent, item)
             item_dest = os.path.join(doc_dir, item)
@@ -398,7 +422,7 @@ def clone_repository():
     """
     repo_url = settings["repository"]["url"]
     repo_dir = os.path.abspath(settings["repository"]["directory"])
-    print(f"Cloning {repo_url} into {repo_dir}")
+    logger.info(f"Cloning {repo_url} into {repo_dir}")
     subprocess.run(["git", "clone", repo_url, repo_dir])
 
 
@@ -411,11 +435,11 @@ def update():
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 
     repo_dir = os.path.abspath(settings["repository"]["directory"])
-    print(f"Updating {repo_dir}")
+    logger.info(f"Updating {repo_dir}")
     with WorkingDir(repo_dir):
         subprocess.check_output(["git", "remote", "-v"])
         subprocess.check_output(["git", "fetch"])
-        subprocess.check_output(["git", "reset", "--hard", "origin/master"])
+        subprocess.check_output(["git", "reset", "--hard", "origin/main"])
         loader = FileSystemLoader(os.path.abspath("./"))
         posts = glob.glob(
             os.path.abspath(settings["blog"]["posts"]) + "/**/*.rst", recursive=True
@@ -427,14 +451,14 @@ def update():
 
     jinja_env = Environment(loader=loader, autoescape=select_autoescape())
     out_dir = os.path.abspath(settings["server"]["directory"])
-    print(f"Cleaning {out_dir}")
+    logger.info(f"Cleaning {out_dir}")
     for f in os.listdir(out_dir):
         path = os.path.join(out_dir, f)
         if os.path.isdir(path):
             shutil.rmtree(path, ignore_errors=True)
         else:
             os.remove(path)
-    print(f"Rendering into {out_dir}")
+    logger.info(f"Rendering into {out_dir}")
     with WorkingDir(out_dir):
         # Copy in static content
         for s in static:
