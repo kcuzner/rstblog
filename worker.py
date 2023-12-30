@@ -1,15 +1,16 @@
-from celery import Celery
-from celery.utils.log import get_task_logger
-
-logger = get_task_logger(__name__)
-
-import subprocess, os
+import abc
+import os
+import subprocess
 from functools import cached_property
 
+from celery import Celery
+from celery.utils.log import get_task_logger
 import docutils.nodes
 from docutils.parsers import rst
 from docutils.writers import html4css1
 import toml
+
+logger = get_task_logger(__name__)
 
 settings = toml.load("./settings.toml")
 app = Celery(
@@ -227,7 +228,7 @@ class Renderable:
         self.render_fn = render_fn
 
     def render(self, **kwargs):
-        # print(f"Rendering {self.out_path}")
+        logger.debug(f"Rendering {self.out_path}")
         with open(self.out_path, "w") as f:
             f.write(self.render_fn(**kwargs))
 
@@ -256,7 +257,7 @@ class DocumentRenderable(Renderable):
         return self._url
 
 
-class Compiler:
+class Compiler(abc.ABC):
     """
     Compiles an rst page, returning a Renderable
     """
@@ -308,11 +309,13 @@ class Compiler:
             doc_preview,
         )
 
+    @abc.abstractmethod
     def get_template(self, jinja_env):
-        raise NotImplementedError(f"get_template must be overriden in {type(self)}")
+        pass
 
+    @abc.abstractmethod
     def get_url(self, page_settings):
-        raise NotImplementedError(f"get_template must be overridden in {type(self)}")
+        pass
 
 
 class PageCompiler(Compiler):
@@ -335,11 +338,16 @@ class PostCompiler(Compiler):
     def get_url(self, page_settings):
         url = page_settings["url"]
         date = page_settings["date"].strftime("%Y/%m/%d")  # YYY/MM/DD
+        # There are two modes for posts:
+        #  - Relative URL: The url is prepended by the date
+        #  - Absolute URL: The URL is used without modification, much like a page
+        #
+        # Imported pages typically will use an absolute URL and handwritten
+        # pages will typically use a relative URL.
         if not os.path.isabs(url):
-            raise ValueError(
-                f'Document {self.src} needs an absolute path, "{page_settings["url"]}" supplied'
-            )
-        return os.path.join(date, os.path.relpath(url, "/"))
+            return os.path.join(date, url)
+        else:
+            return os.path.relpath(url, "/")
 
 
 class RstBlog:
@@ -374,6 +382,7 @@ class RstBlog:
 
         # Render everything
         render_params = {
+            "posts": self.posts,
             "pages": self.pages,
             "posts_by_month": posts_by_month,
             "posts_paginated": paginated,
