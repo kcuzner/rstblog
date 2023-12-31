@@ -1,5 +1,9 @@
 # rstblog
 
+> :warning: :warning: :warning: ***THIS IS A WORK IN PROGRESS*** :warning: :warning: :warning:
+>
+> Contact me directly or open an issue to inquire about the status of this project.
+
 This is some static blogging software based on reStructuredText hosted on a cloud git repository
 and compiled into static HTML in response to webhooks.
 
@@ -8,7 +12,8 @@ with constant Russian spam attacks. Even after giving up and getting rid of all 
 functionality, the server would experience frequent crashes (running out of filesystem handles and
 the like). This is an attempt an extremely lightweight blog which can run cheaply on the smallest
 AWS instance and handle reasonably sized DDOS attacks (I've counted only about 10 or 20 servers per
-"spam cohort", as I call them, in my logs).
+"spam cohort", as I call them, in my logs). It's also possible that some of my woes come from my
+own misconfiguration of the server, so this is also an attempt to resolve those kinds of problems.
 
 # Featuers
 
@@ -57,37 +62,94 @@ figured this all out, but my attack plan is as follows:
 Things I still haven't worked out include how to survive reboots and whether or not the overhead of
 basically running dozens of nginx servers on a single machine is well-advised.
 
+This repository should be cloned directly onto the server, potentially checking out a tag or other
+branch to get a specific version. When the docker containers are composed, the file content of this
+repository is used to configure and build the containers. See the `run_interactive.sh` script for
+an example of one way to run this app.
+
+# Configuration
+
+A `settings.toml` must be supplied in the root of this repository in the production environment,
+based on the settings.tmpl.toml file in this repo. See the template file for details.
+
+In addition, a docker-compose.override.yml may be supplied. This can be used for configuring a
+development setup (as opposed to the production setup) in conjunction with an appropriate
+`settings.toml` file like so:
+
+```toml
+services:
+  worker:
+    volumes:
+      - type: bind
+        # Relative to this repo, this is the location of the in-development blog content
+        source: ../rstblog-content
+        # This target location in the worker repo is also referenced in the local settings.toml
+        # as "/repo" (vs a github URL) for the content repo url.
+        target: /repo
+```
+
 # Blog Content
 
 Blog content should be hosted in a separate repository. It is specified as a combination of Jinja2
-and reStructuredText files.
+and reStructuredText files, with a required pyproject.toml file at the root of the repository
+containing settings.
 
-## Theming
+## Settings
 
-The blog theme and homepage are explicitly set up using a set of Jinja2 templates:
+The following settings should be set in pyproject.toml of the content repository:
 
- - index.j2: This is the template for the homepage of the blog. It is rendered for each page of the
-   post feed.
- - tags.j2: This is the template for a tag page, rendered for each page of the post feed for a
-   particular tag.
- - page.j2: This is the template for a page, content that does not appear directly in the post
-   feed.
- - post.j2: This is the template for a post, content which *does* appear directly in the post feed.
+```toml
+[tool.rstblog]
+# General configuration for rstblog
+paginate = 10
 
-Other than these templates, theme content can be supplied in a few ways:
+[tool.rstblog.templates]
+# Template configuration for rstblog
+#
+# These paths are resolved relative to the pyproject.toml and disallowed from resolving to a path
+# outside the repository. The paths point to Jinja2 templates.
+#
+# index: This is the template for the homepage of the blog. It is rendered for each page of the
+#   post feed.
+# tags: This is the template for a tag page, rendered for each page of the post feed for a
+#   particular tag.
+# page:  This is the template for a page, content that does not appear directly in the post feed.
+# post: This is the template for a post, content which *does* appear directly in the post feed.
+index = "./index.j2"
+tags = "./tags.j2"
+post = "./post.j2"
+page = "./page.j2"
 
- - Direct static content. As configured in settings.toml, everything in the designated "static"
-   folder will be directly copied into the HTML output directory at the root, preserving directory
-   heirarchy. This should include images, CSS and Javascript used by the theming templates.
- - SASS stylesheets. The SASS preprocessor will be ran on any SASS (.scss) file located in the
-   configured static folder, with the result being placed in the output folder in lieu of the
-   source file.
+[tool.rstblog.paths]
+# Path configuration for rstblog
+#
+# Any paths are resolved relative to the pyproject.toml and disallowed from resolving to a path
+# outside the repository.
+#
+# static: List of paths under which to find static content. These files will be copied into the
+#   HTML output directory at the root, preseving heirarchy as it's seen in the repo.
+# pages: Path under which to find ReST files to be treated as pages
+# posts: Path under which to find ReST files to be treated as posts
+static = ["./css", "./js"]
+pages = "./pages"
+posts = "./posts"
 
+[tool.rstblog.pygments]
+# Settings for pygments used in the rstblog for syntax highlighting
+#
+# Any paths are resolved relative to the pyproject.toml and disallowed from resolving to a path
+# outside the repository.
+#
+# style: This is the pygments style name to choose from. Only builtin styles are supported.
+# csspath: This is the path in the HTML output folder to place the pygments style sheet
+style = "friendly"
+csspath = "./css/pygments.css"
+```
 ## Posts
 
 Blog posts can have arbitrary file names, but the standard extension is `.rst`. As configured in
-the settings.toml file, the posts folder in the content repository will be recursively searched for
-all `.rst` files.
+the content pyproject.toml file, the posts folder in the content repository will be recursively
+searched for all `.rst` files.
 
 Post rst files are required to contain a `rstblog-settings` directive. This functions similar to
 the `meta` directive in that it isn't directly rendered into the HTML. Rather than appearing in the
@@ -95,8 +157,10 @@ header, however, it instead controls how the blog post is placed:
 
  - `:title:` Sets the title of the post.
  - `:date:` Sets the date of the post.
- - `:url:` Sets the url name of the post. The full URL to the post will be created from the
-   `:date:` and `:url:` directives so that it is mounted at "/YYYY/MM/DD/url".
+ - `:url:` Sets the url name of the post. If this is simply a relative path (i.e. no leading
+   `/`), The full URL to the post will be created from the `:date:` and `:url:` directives so that
+    it is mounted at "/YYYY/MM/DD/url". Otherwise, it'll simply be mounted at the requested
+    location.
  - `:tags:` Sets the list of tags to categorize this post under.
 
 When rendered, the post will be rendered into an `index.html` page located under a folder
@@ -107,7 +171,8 @@ Hyperlinks, images, and other things which link to other documents have their UR
 according the following rules:
  - All relative paths to media will be evaluated and the media uploaded into the same folder as the
    "index.html" for a post. Reusing the same media for many posts will result in many copies of the
-   media being uploaded until I optimize this.
+   media being uploaded until I optimize this. Absolute paths to images and other media are not
+   allowed (i.e. everything needs to be locally sourced in the content repo.
  - All hyperlinks to rst files should be done using relative paths. These will be parsed into a
    concrete link to the rendered path for the linked rst file, if the file is included in the
    parsing. If the file isn't included, then the link is removed.

@@ -1,6 +1,7 @@
 import abc
 import os
 import subprocess
+from pathlib import Path
 from functools import cached_property
 
 from celery import Celery
@@ -262,7 +263,8 @@ class Compiler(abc.ABC):
     Compiles an rst page, returning a Renderable
     """
 
-    def __init__(self, src):
+    def __init__(self, content_settings, src):
+        self._content_settings = content_settings
         self.src = src
 
     def compile(self, jinja_env, out_dir):
@@ -320,7 +322,7 @@ class Compiler(abc.ABC):
 
 class PageCompiler(Compiler):
     def get_template(self, jinja_env):
-        return jinja_env.get_template(settings["blog"]["page"])
+        return jinja_env.get_template(self._content_settings["templates"]["page"])
 
     def get_url(self, page_settings):
         url = page_settings["url"]
@@ -333,7 +335,7 @@ class PageCompiler(Compiler):
 
 class PostCompiler(Compiler):
     def get_template(self, jinja_env):
-        return jinja_env.get_template(settings["blog"]["post"])
+        return jinja_env.get_template(self._content_settings["templates"]["page"])
 
     def get_url(self, page_settings):
         url = page_settings["url"]
@@ -355,10 +357,17 @@ class RstBlog:
     Renders all blog content, including index and tag pages
     """
 
-    def __init__(self, pages, posts, jinja_env, out_dir):
-        self.pages = [PageCompiler(p).compile(jinja_env, out_dir) for p in pages]
-        self.posts = [PostCompiler(p).compile(jinja_env, out_dir) for p in posts]
-        self.index_template = jinja_env.get_template(settings["blog"]["index"])
+    def __init__(self, content_settings, pages, posts, jinja_env, out_dir):
+        self._content_settings = content_settings
+        self.pages = [
+            PageCompiler(content_settings, p).compile(jinja_env, out_dir) for p in pages
+        ]
+        self.posts = [
+            PostCompiler(content_settings, p).compile(jinja_env, out_dir) for p in posts
+        ]
+        self.index_template = jinja_env.get_template(
+            content_settings["templates"]["index"]
+        )
         self.out_dir = out_dir
 
     def render(self):
@@ -368,7 +377,7 @@ class RstBlog:
         # Posts are sorted by date
         self.posts.sort(key=lambda d: d.doc_settings["date"])
         self.posts.reverse()
-        step = settings["blog"]["paginate"]
+        step = self._content_settings["paginate"]
         paginated = [self.posts[i : i + step] for i in range(0, len(self.posts), step)]
         post_months = [
             (d.doc_settings["date"].strftime("%Y/%m"), d) for d in self.posts
@@ -430,7 +439,7 @@ def clone_repository():
     Creates the initial repository clone
     """
     repo_url = settings["repository"]["url"]
-    repo_dir = os.path.abspath(settings["repository"]["directory"])
+    repo_dir = Path(settings["repository"]["directory"]).resolve()
     logger.info(f"Cloning {repo_url} into {repo_dir}")
     subprocess.run(["git", "clone", repo_url, repo_dir])
 
@@ -443,20 +452,39 @@ def update():
     import glob, shutil
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-    repo_dir = os.path.abspath(settings["repository"]["directory"])
+    repo_dir = Path(settings["repository"]["directory"]).resolve()
     logger.info(f"Updating {repo_dir}")
     with WorkingDir(repo_dir):
         subprocess.check_output(["git", "remote", "-v"])
         subprocess.check_output(["git", "fetch"])
         subprocess.check_output(["git", "reset", "--hard", "origin/main"])
-        loader = FileSystemLoader(os.path.abspath("./"))
-        posts = glob.glob(
-            os.path.abspath(settings["blog"]["posts"]) + "/**/*.rst", recursive=True
-        )
-        pages = glob.glob(
-            os.path.abspath(settings["blog"]["pages"]) + "/**/*.rst", recursive=True
-        )
-        static = [(d, os.path.abspath(d)) for d in settings["blog"]["static"]]
+        subprocess.check_output(["git", "clean", "-fdx", "."])
+        content_settings = toml.load("./pyproject.toml")["tool"]["rstblog"]
+        paths = content_settings[f"paths"]
+        loader = FileSystemLoader(Path().resolve())
+        posts_path = Path(paths["posts"]).resolve()
+        if repo_dir not in posts_path.parents:
+            raise ValueError(
+                f"Resolved post path {str(posts_path)} not in repository {str(repo_dir)}"
+            )
+        pages_path = Path(paths["pages"]).resolve()
+        if repo_dir not in pages_path.parents:
+            raise ValueError(
+                f"Resolved pages pat {str(pages_path)} not in repository {str(repo_dir)}"
+            )
+        static_paths = [Path(d) for d in paths["static"]]
+        for p in static_paths:
+            if p.is_absolute():
+                raise ValueError(
+                    f"Static path {str(p)} is absolute, which is not allowed"
+                )
+            if repo_dir not in p.resolve().parents:
+                raise ValueError(
+                    f"Static path {str(p.resolve())} is not in repository {str(repo_dir)}"
+                )
+        posts = glob.glob(str(posts_path) + "/**/*.rst", recursive=True)
+        pages = glob.glob(str(pages_path) + "/**/*.rst", recursive=True)
+        static = [(p, p.resolve()) for p in static_paths]
 
     jinja_env = Environment(loader=loader, autoescape=select_autoescape())
     out_dir = os.path.abspath(settings["server"]["directory"])
@@ -474,5 +502,5 @@ def update():
             shutil.rmtree(s[0], ignore_errors=True)
             if os.path.exists(s[1]):
                 shutil.copytree(s[1], os.path.abspath(s[0]))
-        blog = RstBlog(pages, posts, jinja_env, out_dir)
+        blog = RstBlog(content_settings, pages, posts, jinja_env, out_dir)
         blog.render()
