@@ -9,6 +9,7 @@ from celery.utils.log import get_task_logger
 import docutils.nodes
 from docutils.parsers import rst
 from docutils.writers import html4css1
+from pygments.formatters import HtmlFormatter
 import toml
 
 logger = get_task_logger(__name__)
@@ -50,20 +51,18 @@ class PygmentsDirective(rst.Directive):
     option_spec = {}
     has_content = True
 
+    pygments_formatter = HtmlFormatter(style="friendly")
+
     def run(self):
         from pygments import highlight
         from pygments.lexers import get_lexer_by_name
-        from pygments.formatters import HtmlFormatter
-        from pygments.styles import get_style_by_name
-
-        pygments_formatter = HtmlFormatter(style="friendly")
 
         try:
             lexer = get_lexer_by_name(self.arguments[0])
         except ValueError:
             # no lexer found - use the text one instead of an exception
             lexer = get_lexer_by_name("text")
-        parsed = highlight("\n".join(self.content), lexer, pygments_formatter)
+        parsed = highlight("\n".join(self.content), lexer, self.pygments_formatter)
         return [docutils.nodes.raw("", parsed, format="html")]
 
 
@@ -431,7 +430,6 @@ class RstBlog:
                         **render_params,
                     )
                 )
-        # Helper static content
 
 
 @app.task
@@ -501,5 +499,12 @@ def update():
         for relpath, srcpath in static:
             if srcpath.exists():
                 shutil.copytree(str(srcpath), str(relpath.resolve()))
+        # Helper static content
+        pygments_css = Path(content_settings["pygments"]["csspath"]).resolve()
+        if out_dir not in pygments_css.parents:
+            raise ValueError(f"Pygments CSS path {pygments_css} is not in output folder {out_dir}")
+        with open(pygments_css, "w") as f:
+            f.write(PygmentsDirective.pygments_formatter.get_style_defs())
+        # Build the blog
         blog = RstBlog(content_settings, pages, posts, jinja_env, out_dir)
         blog.render()
