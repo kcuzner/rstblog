@@ -12,10 +12,7 @@ settings = toml.load("./settings.toml")
 actions = queue.Queue()
 app = Flask(__name__)
 
-
-@app.before_first_request
-def clone_repo():
-    worker.clone_repository.delay().wait()
+worker.clone_repository.delay().wait()
 
 
 def validate_hmac(f):

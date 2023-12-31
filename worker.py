@@ -159,7 +159,7 @@ class BlogTranslator(html4css1.HTMLTranslator):
         super().visit_image(node)
         # Collect any images referenced
         uri = node["uri"]
-        if os.path.isabs(uri):
+        if Path(uri).is_absolute():
             raise ValueError(
                 f"Image {node} references an absolute path to an image, this is not allowed"
             )
@@ -285,17 +285,17 @@ class Compiler(abc.ABC):
         title = doc_settings["title"]
         tags = doc_settings["tags"]
         # Determine page path
-        url = self.get_url(doc_settings)
-        logger.debug(f"Got url {url}, out_dir={out_dir}")
-        doc_dir = os.path.join(out_dir, url)
-        logger.debug(f"Doc dir: {doc_dir}")
-        out_path = os.path.join(doc_dir, "index.html")
+        url = Path(self.get_url(doc_settings))
+        logger.debug(f"Got url {str(url)}, out_dir={str(out_dir)}")
+        doc_dir = out_dir / url
+        logger.debug(f"Doc dir: {str(doc_dir)}")
+        out_path = doc_dir / "index.html"
         os.makedirs(doc_dir, exist_ok=True)  # Subpaths of dates may exist
         # Copy content
         logger.debug(f"Copying {len(doc_content)} items into {doc_dir}")
         for item in doc_content:
-            item_src = os.path.join(Path(self.src).parent, item)
-            item_dest = os.path.join(doc_dir, item)
+            item_src = Path(self.src).parent / item
+            item_dest = doc_dir / item
             shutil.copyfile(item_src, item_dest)
         # Set up for rendering
         # Actual rendering occurs later since we need the full list of posts
@@ -325,12 +325,12 @@ class PageCompiler(Compiler):
         return jinja_env.get_template(self._content_settings["templates"]["page"])
 
     def get_url(self, page_settings):
-        url = page_settings["url"]
-        if not os.path.isabs(url):
+        url = Path(page_settings["url"])
+        if not Path(url).is_absolute():
             raise ValueError(
                 f'Document {self.src} needs an absolute path, "{page_settings["url"]}" supplied'
             )
-        return os.path.relpath(url, "/")
+        return url.relative_to(Path("/"))
 
 
 class PostCompiler(Compiler):
@@ -338,18 +338,18 @@ class PostCompiler(Compiler):
         return jinja_env.get_template(self._content_settings["templates"]["page"])
 
     def get_url(self, page_settings):
-        url = page_settings["url"]
-        date = page_settings["date"].strftime("%Y/%m/%d")  # YYY/MM/DD
+        url = Path(page_settings["url"])
+        date = Path(page_settings["date"].strftime("%Y/%m/%d"))  # YYY/MM/DD
         # There are two modes for posts:
         #  - Relative URL: The url is prepended by the date
         #  - Absolute URL: The URL is used without modification, much like a page
         #
         # Imported pages typically will use an absolute URL and handwritten
         # pages will typically use a relative URL.
-        if not os.path.isabs(url):
-            return os.path.join(date, url)
+        if not url.is_absolute():
+            return date / url
         else:
-            return os.path.relpath(url, "/")
+            return url.relative_to(Path("/"))
 
 
 class RstBlog:
@@ -368,7 +368,7 @@ class RstBlog:
         self.index_template = jinja_env.get_template(
             content_settings["templates"]["index"]
         )
-        self.out_dir = out_dir
+        self.out_dir = Path(out_dir)
 
     def render(self):
         import itertools
@@ -408,7 +408,7 @@ class RstBlog:
                 name = f"{url}/index{i}" if i else f"{url}/index"
                 # NOTE: The folder should have already been created when rendering
                 # pages and posts
-                with open(os.path.join(self.out_dir, f"{name}.html"), "w") as f:
+                with open(self.out_dir / f"{name}.html", "w") as f:
                     f.write(
                         self.index_template.render(
                             index_name=f"Posts {month}, Page {i+1}",
@@ -421,7 +421,7 @@ class RstBlog:
         # Main index
         for i, page in enumerate(paginated):
             name = f"index{i}" if i else "index"
-            with open(os.path.join(self.out_dir, f"./{name}.html"), "w") as f:
+            with open(self.out_dir / f"./{name}.html", "w") as f:
                 f.write(
                     self.index_template.render(
                         index_name=f"Page {i+1}",
@@ -431,6 +431,7 @@ class RstBlog:
                         **render_params,
                     )
                 )
+        # Helper static content
 
 
 @app.task
@@ -487,20 +488,18 @@ def update():
         static = [(p, p.resolve()) for p in static_paths]
 
     jinja_env = Environment(loader=loader, autoescape=select_autoescape())
-    out_dir = os.path.abspath(settings["server"]["directory"])
+    out_dir = Path(settings["server"]["directory"]).resolve()
     logger.info(f"Cleaning {out_dir}")
-    for f in os.listdir(out_dir):
-        path = os.path.join(out_dir, f)
-        if os.path.isdir(path):
-            shutil.rmtree(path, ignore_errors=True)
+    for p in out_dir.iterdir():
+        if p.is_dir():
+            shutil.rmtree(str(p), ignore_errors=True)
         else:
-            os.remove(path)
+            os.remove(str(p))
     logger.info(f"Rendering into {out_dir}")
     with WorkingDir(out_dir):
         # Copy in static content
-        for s in static:
-            shutil.rmtree(s[0], ignore_errors=True)
-            if os.path.exists(s[1]):
-                shutil.copytree(s[1], os.path.abspath(s[0]))
+        for relpath, srcpath in static:
+            if srcpath.exists():
+                shutil.copytree(str(srcpath), str(relpath.resolve()))
         blog = RstBlog(content_settings, pages, posts, jinja_env, out_dir)
         blog.render()

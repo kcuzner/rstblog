@@ -1,8 +1,8 @@
-FROM python:3.8.10-slim
+FROM python:3.11.7-alpine
 
-RUN apt-get update && \
-    apt-get -y install git && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+RUN apk update && \
+    apk add git && \
+    apk cache clean && rm -rf /tmp/* /var/tmp/*
 
 ARG YOUR_ENV
 
@@ -13,7 +13,7 @@ ENV YOUR_ENV=${YOUR_ENV} \
   PIP_NO_CACHE_DIR=off \
   PIP_DISABLE_PIP_VERSION_CHECK=on \
   PIP_DEFAULT_TIMEOUT=100 \
-  POETRY_VERSION=1.0.0
+  POETRY_VERSION=1.4.2
 
 # System deps:
 RUN pip3 install "poetry==$POETRY_VERSION" gevent
@@ -24,7 +24,7 @@ COPY poetry.lock pyproject.toml /app/
 
 # Project initialization:
 RUN poetry config virtualenvs.create false \
-  && poetry install $(test "$YOUR_ENV" == production && echo "--no-dev") --no-interaction --no-ansi
+  && poetry install -vvv --no-dev --no-interaction --no-ansi
 
 # Set up flask environment
 env FLASK_APP=app
