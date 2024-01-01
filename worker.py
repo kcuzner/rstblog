@@ -1,4 +1,5 @@
 import abc
+import contextlib
 import os
 import subprocess
 from pathlib import Path
@@ -23,21 +24,18 @@ app = Celery(
 )
 
 
-class WorkingDir:
+@contextlib.contextmanager
+def working_dir(directory):
     """
     Execute a block of code while in a particular working directory, restoring
     the previous directory once finished.
     """
-
-    def __init__(self, directory):
-        self.dir = directory
-
-    def __enter__(self):
-        self.original = os.getcwd()
-        os.chdir(self.dir)
-
-    def __exit__(self, type, value, traceback):
-        os.chdir(self.original)
+    original = os.getcwd()
+    os.chdir(directory)
+    try:
+        yield
+    finally:
+        os.chdir(original)
 
 
 class PygmentsDirective(rst.Directive):
@@ -45,24 +43,60 @@ class PygmentsDirective(rst.Directive):
     Handle code-block directives using Pygments
     """
 
-    required_arguments = 1
-    optional_arguments = 0
+    required_arguments = 0
+    optional_arguments = 1
     final_argument_whitespace = True
-    option_spec = {}
+    option_spec = {
+        "height-limit": rst.directives.flag,
+    }
     has_content = True
 
-    pygments_formatter = HtmlFormatter(style="friendly")
+    _formatter_args = None
+
+    @classmethod
+    @contextlib.contextmanager
+    def configure(cls, content_settings):
+        """
+        This should be called as a context to configure the pygments directive
+        for a run.
+        """
+        settings = content_settings["pygments"]
+        cls._formatter_args = {
+            "style": settings["style"],
+            "linenos": "inline",
+        }
+        try:
+            yield cls
+        finally:
+            cls._formatter_args = None
+
+    @classmethod
+    def get_formatter(cls, **kwargs):
+        if cls._formatter_args is None:
+            raise ValueError(f"PygmentsDirective is not configured")
+        args = cls._formatter_args.copy()
+        args.update(kwargs)
+        return HtmlFormatter(**args)
 
     def run(self):
         from pygments import highlight
         from pygments.lexers import get_lexer_by_name
 
+        cssstyles = (
+            "max-height: 200px; overflow-y: scroll;"
+            if "height-limit" in self.options
+            else ""
+        )
+
+        formatter = self.get_formatter(cssstyles=cssstyles)
+        language = next(iter(self.arguments), "text")
+
         try:
-            lexer = get_lexer_by_name(self.arguments[0])
+            lexer = get_lexer_by_name(language)
         except ValueError:
             # no lexer found - use the text one instead of an exception
             lexer = get_lexer_by_name("text")
-        parsed = highlight("\n".join(self.content), lexer, self.pygments_formatter)
+        parsed = highlight("\n".join(self.content), lexer, formatter)
         return [docutils.nodes.raw("", parsed, format="html")]
 
 
@@ -453,7 +487,7 @@ def update():
 
     repo_dir = Path(settings["repository"]["directory"]).resolve()
     logger.info(f"Updating {repo_dir}")
-    with WorkingDir(repo_dir):
+    with working_dir(repo_dir):
         subprocess.check_output(["git", "remote", "-v"])
         subprocess.check_output(["git", "fetch"])
         subprocess.check_output(["git", "reset", "--hard", "origin/main"])
@@ -494,7 +528,7 @@ def update():
         else:
             os.remove(str(p))
     logger.info(f"Rendering into {out_dir}")
-    with WorkingDir(out_dir):
+    with working_dir(out_dir), PygmentsDirective.configure(content_settings):
         # Copy in static content
         for relpath, srcpath in static:
             if srcpath.exists():
@@ -502,9 +536,12 @@ def update():
         # Helper static content
         pygments_css = Path(content_settings["pygments"]["csspath"]).resolve()
         if out_dir not in pygments_css.parents:
-            raise ValueError(f"Pygments CSS path {pygments_css} is not in output folder {out_dir}")
+            raise ValueError(
+                f"Pygments CSS path {pygments_css} is not in output folder {out_dir}"
+            )
         with open(pygments_css, "w") as f:
-            f.write(PygmentsDirective.pygments_formatter.get_style_defs())
+            formatter = PygmentsDirective.get_formatter()
+            f.write(formatter.get_style_defs(".highlight"))
         # Build the blog
         blog = RstBlog(content_settings, pages, posts, jinja_env, out_dir)
         blog.render()
