@@ -1,6 +1,7 @@
 import abc
 import contextlib
 import os
+import re
 import subprocess
 from pathlib import Path
 from functools import cached_property
@@ -189,6 +190,12 @@ class BlogTranslator(html4css1.HTMLTranslator):
         return self._rstblog_preview if self._rstblog_preview else "".join(self.body)
 
     def visit_image(self, node):
+        if "width" in node:
+            # Modify the width so that it doesn't go wider than the page
+            w = node["width"]
+            if re.match(r"^[0-9.]+$", w):
+                w += "px" # Interpret unitless as pixels
+            node["width"] = f"min({w}, 100%)"
         super().visit_image(node)
         # Collect any images referenced
         uri = node["uri"]
