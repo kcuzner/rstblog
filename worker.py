@@ -3,8 +3,10 @@ import contextlib
 import os
 import re
 import subprocess
+from html.parser import HTMLParser
 from pathlib import Path
 from functools import cached_property
+from typing import NamedTuple
 
 from celery import Celery
 from celery.utils.log import get_task_logger
@@ -108,6 +110,19 @@ class rstblog_settings(docutils.nodes.Element):
     pass
 
 
+class PostTag(NamedTuple):
+    """
+    Represents a post tag
+    """
+
+    name: str
+
+    @property
+    def url(self):
+        sanitized = self.name.replace(" ", "-")
+        return f"tags/{sanitized}"
+
+
 class RstBlogSettingsDirective(rst.Directive):
     """
     Handle rstblog-settings directives
@@ -117,7 +132,9 @@ class RstBlogSettingsDirective(rst.Directive):
 
     def taglist(argument):
         if argument and argument.strip():
-            return [x.strip() for x in argument.split(",") if x.strip()]
+            return [
+                PostTag(x.strip().lower()) for x in argument.split(",") if x.strip()
+            ]
         return []
 
     def date(argument):
@@ -173,6 +190,30 @@ class RstBlogBreakDirective(rst.Directive):
 rst.directives.register_directive("rstblog-break", RstBlogBreakDirective)
 
 
+class HtmlCompleter(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self._stack = []
+
+    def handle_starttag(self, tag, _attrs):
+        self._stack.append(tag)
+
+    def handle_endtag(self, tag):
+        while self._stack.pop() != tag:
+            pass
+
+    def complete(self, data):
+        """
+        Closes any unclosed tags in the passed HTML
+        """
+        self.feed(data)
+        self._stack.reverse()
+        end = "".join([f"</{t}>" for t in self._stack])
+        self._stack.clear()
+        logger.debug(f"Appending {end} to data")
+        return data + "\n" + end
+
+
 class BlogTranslator(html4css1.HTMLTranslator):
     """
     Customized docutils translator which handles the rstblog-settings nodes
@@ -194,7 +235,7 @@ class BlogTranslator(html4css1.HTMLTranslator):
             # Modify the width so that it doesn't go wider than the page
             w = node["width"]
             if re.match(r"^[0-9.]+$", w):
-                w += "px" # Interpret unitless as pixels
+                w += "px"  # Interpret unitless as pixels
             node["width"] = f"min({w}, 100%)"
         super().visit_image(node)
         # Collect any images referenced
@@ -213,7 +254,8 @@ class BlogTranslator(html4css1.HTMLTranslator):
         pass
 
     def visit_rstblog_break(self, node):
-        self._rstblog_preview = "".join(self.body)
+        body = "".join(self.body)
+        self._rstblog_preview = HtmlCompleter().complete(body)
 
     def depart_rstblog_break(self, node):
         pass
@@ -330,7 +372,7 @@ class Compiler(abc.ABC):
         doc_dir = out_dir / url
         logger.debug(f"Doc dir: {str(doc_dir)}")
         out_path = doc_dir / "index.html"
-        os.makedirs(doc_dir, exist_ok=True)  # Subpaths of dates may exist
+        doc_dir.mkdir(parents=True, exist_ok=True)  # Subpaths of dates may exist
         # Copy content
         logger.debug(f"Copying {len(doc_content)} items into {doc_dir}")
         for item in doc_content:
@@ -375,7 +417,7 @@ class PageCompiler(Compiler):
 
 class PostCompiler(Compiler):
     def get_template(self, jinja_env):
-        return jinja_env.get_template(self._content_settings["templates"]["page"])
+        return jinja_env.get_template(self._content_settings["templates"]["post"])
 
     def get_url(self, page_settings):
         url = Path(page_settings["url"])
@@ -428,11 +470,26 @@ class RstBlog:
                 self.posts, key=lambda p: p.doc_settings["date"].strftime("%Y/%m")
             )
         ]
+        # Tags are sorted alphabetically
+        tags = sorted(
+            set((t, p) for p in self.posts for t in p.doc_settings["tags"]),
+            key=lambda t: t[0].name.lower(),
+        )
+        posts_by_tag = [
+            (t, [p for _, p in g])
+            for t, g in itertools.groupby(tags, key=lambda t: t[0])
+        ]
+        # Sort posts within tags by date
+        for _, p in posts_by_tag:
+            p.sort(key=lambda d: d.doc_settings["date"])
+            p.reverse()
 
         # Render everything
         render_params = {
+            "zip": zip,
             "posts": self.posts,
             "pages": self.pages,
+            "posts_by_tag": posts_by_tag,
             "posts_by_month": posts_by_month,
             "posts_paginated": paginated,
         }
@@ -442,7 +499,6 @@ class RstBlog:
         # Monthly index
         for date, url, posts in posts_by_month:
             month_paginated = [posts[i : i + step] for i in range(0, len(posts), step)]
-            name = f"{url}/index.html"
             month = date.strftime("%b %Y")
             for i, page in enumerate(month_paginated):
                 name = f"{url}/index{i}" if i else f"{url}/index"
@@ -452,7 +508,24 @@ class RstBlog:
                     f.write(
                         self.index_template.render(
                             index_name=f"Posts {month}, Page {i+1}",
-                            index_posts=posts,
+                            index_posts=page,
+                            index_number=0,
+                            index_count=1,
+                            **render_params,
+                        )
+                    )
+        # Tag index
+        for tag, posts in posts_by_tag:
+            tag_paginated = [posts[i : i + step] for i in range(0, len(posts), step)]
+            for i, page in enumerate(tag_paginated):
+                name = f"{tag.url}/index{i}" if i else f"{tag.url}/index"
+                path = self.out_dir / f"{name}.html"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with open(path, "w") as f:
+                    f.write(
+                        self.index_template.render(
+                            index_name=f"{tag} Posts, Page {i+1}",
+                            index_posts=page,
                             index_number=0,
                             index_count=1,
                             **render_params,
