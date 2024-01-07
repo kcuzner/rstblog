@@ -15,7 +15,7 @@ AWS instance and handle reasonably sized DDOS attacks (I've counted only about 1
 "spam cohort", as I call them, in my logs). It's also possible that some of my woes come from my
 own misconfiguration of the server, so this is also an attempt to resolve those kinds of problems.
 
-# Featuers
+# Features
 
 - Git-based publishing workflow, specifically tailored towards GitHub.
 - No commenting functionality (yes, to me this is a feature).
