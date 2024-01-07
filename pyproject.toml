@@ -12,6 +12,7 @@ toml = "^0.10.2"
 celery = {extras = ["redis"], version = "^5.1.2"}
 Pygments = "^2.10.0"
 Jinja2 = "^3.0.3"
+gunicorn = "^21.2.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^3.4"

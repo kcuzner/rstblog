@@ -1,9 +1,11 @@
 services:
   redis:
     image: "redis:5-alpine"
+    restart: always
   nginx:
     build:
       context: ./nginx
+    restart: always
     ports:
       - "3000:80"
     depends_on:
@@ -12,14 +14,16 @@ services:
       - content:/app/output
   web:
     build: .
-    command: python pywsgi.py
+    command: gunicorn -k gevent --access-logfile - -b 0.0.0.0:5000 'app:app'
+    restart: always
     depends_on:
       - "redis"
     volumes:
       - content:/app/output/html
   worker:
     build: .
-    command: poetry run celery -A worker worker -B -l debug
+    command: poetry run celery -A worker worker -l debug
+    restart: always
     depends_on:
       - "redis"
     volumes:
