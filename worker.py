@@ -386,7 +386,7 @@ class Compiler(abc.ABC):
         return DocumentRenderable(
             out_path,
             lambda **kwargs: template.render(
-                parts=parts, title=title, tags=tags, **kwargs
+                parts=parts, title=title, tags=tags, settings=doc_settings, **kwargs
             ),
             url,
             doc_settings,
