@@ -36,6 +36,12 @@ def validate_hmac(f):
 
     return wrapper
 
+if not settings["server"]["secret"]:
+    @app.route("/test")
+    def test_refresh():
+        _log.info("Refresh request received")
+        worker.update.delay()
+        return {}
 
 @app.route("/refresh", methods=["POST"])
 @validate_hmac
