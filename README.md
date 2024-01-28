@@ -51,13 +51,12 @@ Redis is used as the backbone for the communication between `web` and `worker`.
 This is meant to be deployed on a single server, along with several other apps. I haven't quite
 figured this all out, but my attack plan is as follows:
 
- - On the host server, have a "primary service group" which takes over ports 80 and 443, serving
-   with nginx. It should have a named network and the nginx configuration file should have
-   knowledge of the apps that are running and reverse-proxy to them. One app, probably this one,
-   will serve the `/` endpoint.
+ - On the host server, have a "primary" which takes over ports 80 and 443, serving with nginx. It
+   should have a named network and the nginx configuration file should have knowledge of the apps
+   that are running and reverse-proxy to them. One app, probably this one, will serve the `/`
+   endpoint.
  - For each app to run, such as this blog, they'll be executed with a separate `docker-compose`
-   invocation, but should be overridden to have their nginx instance attached to the aforementioned
-   named network, probably with the hostname overridden to something more global.
+   invocation, binding to a host port, ideally one not exposed to the public network.
 
 Things I still haven't worked out include how to survive reboots and whether or not the overhead of
 basically running dozens of nginx servers on a single machine is well-advised.
