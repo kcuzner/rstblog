@@ -14,6 +14,7 @@ settings = toml.load("./settings.toml")
 app = Flask(__name__)
 
 worker.clone_repository.delay().wait()
+worker.update.delay().wait()
 
 _log = app.logger
 
@@ -36,16 +37,20 @@ def validate_hmac(f):
 
     return wrapper
 
+def _refresh(branch=None):
+    _log.info("Refresh request received")
+    worker.update.delay(branch=branch)
+    return {}
+
 if not settings["server"]["secret"]:
     @app.route("/test")
     def test_refresh():
-        _log.info("Refresh request received")
-        worker.update.delay()
-        return {}
+        _log.warn("Test endpoint used, no authenticatin!")
+        branch = request.args.get("branch", None)
+        return _refresh(branch)
 
 @app.route("/refresh", methods=["POST"])
 @validate_hmac
 def request_refresh():
     _log.info("Refresh request received")
-    worker.update.delay()
-    return {}
+    return _refresh()

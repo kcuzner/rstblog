@@ -4,6 +4,8 @@
 url = "../rstblog-content"
 # Directory to clone into
 directory = "./output/repo"
+# Branch to use
+branch = "main"
 
 [server]
 directory = "./output/html"

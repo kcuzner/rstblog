@@ -18,6 +18,9 @@ ENV YOUR_ENV=${YOUR_ENV} \
 # System deps:
 RUN pip3 install "poetry==$POETRY_VERSION" gevent
 
+# Configure git
+RUN git config --global --add safe.directory "*"
+
 # Copy only requirements to cache them in docker layer
 WORKDIR /app/
 COPY poetry.lock pyproject.toml /app/

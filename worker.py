@@ -558,19 +558,22 @@ def clone_repository():
 
 
 @app.task
-def update():
+def update(branch=None):
     """
     Updates the repo and re-renders all content
+
+    :param branch: If supplied, overrides the branch to checkout
     """
     import glob, shutil
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 
     repo_dir = Path(settings["repository"]["directory"]).resolve()
-    logger.info(f"Updating {repo_dir}")
+    use_branch = branch if branch else settings["repository"]["branch"]
+    logger.info(f"Updating {repo_dir} to point at branch {branch}")
     with working_dir(repo_dir):
         subprocess.check_output(["git", "remote", "-v"])
         subprocess.check_output(["git", "fetch"])
-        subprocess.check_output(["git", "reset", "--hard", "origin/main"])
+        subprocess.check_output(["git", "checkout", "--detach", f"origin/{use_branch}"])
         subprocess.check_output(["git", "clean", "-fdx", "."])
         content_settings = toml.load("./pyproject.toml")["tool"]["rstblog"]
         paths = content_settings[f"paths"]
