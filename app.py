@@ -37,17 +37,21 @@ def validate_hmac(f):
 
     return wrapper
 
-def _refresh(branch=None):
+def _refresh(branch=None, wait=False):
     _log.info("Refresh request received")
-    worker.update.delay(branch=branch)
+    t = worker.update.delay(branch=branch)
+    if wait:
+        t.wait()
     return {}
 
 if not settings["server"]["secret"]:
+    _log.warn("App is running in debug mode, unauthenticated endpoint is available.")
+
     @app.route("/test")
     def test_refresh():
-        _log.warn("Test endpoint used, no authenticatin!")
+        _log.warn("Test endpoint used, no authentication!")
         branch = request.args.get("branch", None)
-        return _refresh(branch)
+        return _refresh(branch, wait=True)
 
 @app.route("/refresh", methods=["POST"])
 @validate_hmac
