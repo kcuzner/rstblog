@@ -524,7 +524,7 @@ class RstBlog:
                 with open(path, "w") as f:
                     f.write(
                         self.index_template.render(
-                            index_name=f"{tag} Posts, Page {i+1}",
+                            index_name=f"Tag {tag.name} Posts, Page {i+1}",
                             index_posts=page,
                             index_number=0,
                             index_count=1,
