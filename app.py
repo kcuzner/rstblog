@@ -18,6 +18,7 @@ worker.update.delay().wait()
 
 _log = app.logger
 
+
 def validate_hmac(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -37,12 +38,14 @@ def validate_hmac(f):
 
     return wrapper
 
+
 def _refresh(branch=None, wait=False):
     _log.info("Refresh request received")
     t = worker.update.delay(branch=branch)
     if wait:
         t.wait()
     return {}
+
 
 if not settings["server"]["secret"]:
     _log.warn("App is running in debug mode, unauthenticated endpoint is available.")
@@ -52,6 +55,7 @@ if not settings["server"]["secret"]:
         _log.warn("Test endpoint used, no authentication!")
         branch = request.args.get("branch", None)
         return _refresh(branch, wait=True)
+
 
 @app.route("/refresh", methods=["POST"])
 @validate_hmac

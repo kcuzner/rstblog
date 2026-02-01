@@ -11,6 +11,7 @@ from typing import NamedTuple
 from celery import Celery
 from celery.utils.log import get_task_logger
 import docutils.nodes
+import docutils.transforms
 from docutils.parsers import rst
 from docutils.writers import html4css1
 from pygments.formatters import HtmlFormatter
@@ -237,14 +238,16 @@ class BlogTranslator(html4css1.HTMLTranslator):
             if re.match(r"^[0-9.]+$", w):
                 w += "px"  # Interpret unitless as pixels
             node["width"] = f"min({w}, 100%)"
-        super().visit_image(node)
-        # Collect any images referenced
-        uri = node["uri"]
-        if Path(uri).is_absolute():
+        # Update the URL to be an absolute URL
+        local_uri = node["uri"]
+        if Path(local_uri).is_absolute():
             raise ValueError(
                 f"Image {node} references an absolute path to an image, this is not allowed"
             )
-        self.rstblog_content.append(uri)
+        node["uri"] = str("/" / Path(self.rstblog_url) / local_uri)
+        super().visit_image(node)
+        # Collect any images referenced
+        self.rstblog_content.append(local_uri)
 
     def visit_rstblog_settings(self, node):
         for setting, value in node.attlist():
@@ -261,19 +264,52 @@ class BlogTranslator(html4css1.HTMLTranslator):
         pass
 
 
+class PageBlogTranslator(BlogTranslator):
+    @property
+    def rstblog_url(self):
+        url = Path(self.rstblog_settings["url"])
+        if not Path(url).is_absolute():
+            raise ValueError(
+                f'Document needs an absolute path, "{self.rstblog_settings["url"]}" supplied'
+            )
+        return str(url.relative_to(Path("/")))
+
+
+class PostBlogTranslator(BlogTranslator):
+    @property
+    def rstblog_url(self):
+        url = Path(self.rstblog_settings["url"])
+        date = Path(self.rstblog_settings["date"].strftime("%Y/%m/%d"))  # YYY/MM/DD
+        # There are two modes for posts:
+        #  - Relative URL: The url is prepended by the date
+        #  - Absolute URL: The URL is used without modification, much like a page
+        #
+        # Imported pages typically will use an absolute URL and handwritten
+        # pages will typically use a relative URL.
+        if not url.is_absolute():
+            return str(date / url)
+        else:
+            return str(url.relative_to(Path("/")))
+
+
 class BlogWriter(html4css1.Writer):
     """
     Customized docutils writer which handles the rstblog-settings nodes
     declaring metadata about a document.
     """
 
-    rstblog_attributes = ("rstblog_settings", "rstblog_content", "rstblog_preview")
+    rstblog_attributes = (
+        "rstblog_settings",
+        "rstblog_content",
+        "rstblog_preview",
+        "rstblog_url",
+    )
 
     visitor_attributes = html4css1.Writer.visitor_attributes + rstblog_attributes
 
-    def __init__(self, src):
+    def __init__(self, src, translator_class):
         super().__init__()
-        self.translator_class = BlogTranslator
+        self.translator_class = translator_class
         self._src = src
 
     def translate(self):
@@ -299,6 +335,16 @@ class BlogWriter(html4css1.Writer):
                 self.parts[part] = getattr(self, part)
             else:
                 self.parts[part] = "".join(getattr(self, part))
+
+
+class PageBlogWriter(BlogWriter):
+    def __init__(self, src):
+        super().__init__(src, PageBlogTranslator)
+
+
+class PostBlogWriter(BlogWriter):
+    def __init__(self, src):
+        super().__init__(src, PostBlogTranslator)
 
 
 class Renderable:
@@ -345,9 +391,10 @@ class Compiler(abc.ABC):
     Compiles an rst page, returning a Renderable
     """
 
-    def __init__(self, content_settings, src):
+    def __init__(self, content_settings, src, writer_class):
         self._content_settings = content_settings
         self.src = src
+        self.writer_class = writer_class
 
     def compile(self, jinja_env, out_dir):
         import shutil
@@ -359,17 +406,17 @@ class Compiler(abc.ABC):
         with open(self.src) as f:
             parts = docutils.core.publish_parts(
                 source=f.read(),
-                writer=BlogWriter(self.src),
+                writer=self.writer_class(self.src),
             )
         doc_settings = parts["rstblog_settings"]
         doc_content = parts["rstblog_content"]
         doc_preview = parts["rstblog_preview"]
+        doc_url = parts["rstblog_url"]
         title = doc_settings["title"]
         tags = doc_settings["tags"]
         # Determine page path
-        url = Path(self.get_url(doc_settings))
-        logger.debug(f"Got url {str(url)}, out_dir={str(out_dir)}")
-        doc_dir = out_dir / url
+        logger.debug(f"Got url {str(doc_url)}, out_dir={str(out_dir)}")
+        doc_dir = out_dir / doc_url
         logger.debug(f"Doc dir: {str(doc_dir)}")
         out_path = doc_dir / "index.html"
         doc_dir.mkdir(parents=True, exist_ok=True)  # Subpaths of dates may exist
@@ -388,7 +435,7 @@ class Compiler(abc.ABC):
             lambda **kwargs: template.render(
                 parts=parts, title=title, tags=tags, settings=doc_settings, **kwargs
             ),
-            url,
+            doc_url,
             doc_settings,
             doc_preview,
         )
@@ -397,41 +444,21 @@ class Compiler(abc.ABC):
     def get_template(self, jinja_env):
         pass
 
-    @abc.abstractmethod
-    def get_url(self, page_settings):
-        pass
-
 
 class PageCompiler(Compiler):
+    def __init__(self, content_settings, src):
+        super().__init__(content_settings, src, PageBlogWriter)
+
     def get_template(self, jinja_env):
         return jinja_env.get_template(self._content_settings["templates"]["page"])
 
-    def get_url(self, page_settings):
-        url = Path(page_settings["url"])
-        if not Path(url).is_absolute():
-            raise ValueError(
-                f'Document {self.src} needs an absolute path, "{page_settings["url"]}" supplied'
-            )
-        return url.relative_to(Path("/"))
-
 
 class PostCompiler(Compiler):
+    def __init__(self, content_settings, src):
+        super().__init__(content_settings, src, PostBlogWriter)
+
     def get_template(self, jinja_env):
         return jinja_env.get_template(self._content_settings["templates"]["post"])
-
-    def get_url(self, page_settings):
-        url = Path(page_settings["url"])
-        date = Path(page_settings["date"].strftime("%Y/%m/%d"))  # YYY/MM/DD
-        # There are two modes for posts:
-        #  - Relative URL: The url is prepended by the date
-        #  - Absolute URL: The URL is used without modification, much like a page
-        #
-        # Imported pages typically will use an absolute URL and handwritten
-        # pages will typically use a relative URL.
-        if not url.is_absolute():
-            return date / url
-        else:
-            return url.relative_to(Path("/"))
 
 
 class RstBlog:
